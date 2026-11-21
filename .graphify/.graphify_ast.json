@@ -1,0 +1,66 @@
+{
+  "nodes": [
+    {
+      "id": "reportsserviceapplication",
+      "label": "ReportsServiceApplication.java",
+      "file_type": "code",
+      "source_file": "src/main/java/com/yanki/reports/ReportsServiceApplication.java",
+      "source_location": "L1"
+    },
+    {
+      "id": "reportsserviceapplication_reportsserviceapplication",
+      "label": "ReportsServiceApplication",
+      "file_type": "code",
+      "source_file": "src/main/java/com/yanki/reports/ReportsServiceApplication.java",
+      "source_location": "L15"
+    },
+    {
+      "id": "reportsserviceapplication_reportsserviceapplication_main",
+      "label": ".main()",
+      "file_type": "code",
+      "source_file": "src/main/java/com/yanki/reports/ReportsServiceApplication.java",
+      "source_location": "L23"
+    }
+  ],
+  "edges": [
+    {
+      "source": "reportsserviceapplication",
+      "target": "springapplication",
+      "relation": "imports",
+      "confidence": "EXTRACTED",
+      "source_file": "src/main/java/com/yanki/reports/ReportsServiceApplication.java",
+      "source_location": "L3",
+      "weight": 1
+    },
+    {
+      "source": "reportsserviceapplication",
+      "target": "springbootapplication",
+      "relation": "imports",
+      "confidence": "EXTRACTED",
+      "source_file": "src/main/java/com/yanki/reports/ReportsServiceApplication.java",
+      "source_location": "L4",
+      "weight": 1
+    },
+    {
+      "source": "reportsserviceapplication",
+      "target": "reportsserviceapplication_reportsserviceapplication",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "src/main/java/com/yanki/reports/ReportsServiceApplication.java",
+      "source_location": "L15",
+      "weight": 1
+    },
+    {
+      "source": "reportsserviceapplication_reportsserviceapplication",
+      "target": "reportsserviceapplication_reportsserviceapplication_main",
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "src/main/java/com/yanki/reports/ReportsServiceApplication.java",
+      "source_location": "L23",
+      "weight": 1
+    }
+  ],
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "hyperedges": []
+}
