@@ -2,6 +2,7 @@ package com.yanki.reports.interfaces.rest;
 
 import com.yanki.reports.domain.model.AggregatedReport;
 import com.yanki.reports.domain.model.CardMovementsReport;
+import com.yanki.reports.domain.model.Customer360;
 import com.yanki.reports.domain.model.CustomerReport;
 import com.yanki.reports.domain.model.CustomerSummary;
 import com.yanki.reports.domain.model.DailyAggregate;
@@ -9,6 +10,7 @@ import com.yanki.reports.domain.model.ProductEvent;
 import com.yanki.reports.domain.model.ProductSummary;
 import com.yanki.reports.domain.port.in.GenerateAggregatedReportUseCase;
 import com.yanki.reports.domain.port.in.GetCardMovementsUseCase;
+import com.yanki.reports.domain.port.in.GetCustomer360UseCase;
 import com.yanki.reports.domain.port.in.GetCustomerReportUseCase;
 import com.yanki.reports.domain.port.in.GetCustomerSummaryUseCase;
 import com.yanki.reports.domain.port.in.GetDailyAggregatesUseCase;
@@ -16,6 +18,7 @@ import com.yanki.reports.domain.port.in.GetProductEventsByDateRangeUseCase;
 import com.yanki.reports.domain.port.in.GetProductSummaryUseCase;
 import com.yanki.reports.interfaces.rest.dto.AggregatedReportResponse;
 import com.yanki.reports.interfaces.rest.dto.CardMovementsResponse;
+import com.yanki.reports.interfaces.rest.dto.Customer360Response;
 import com.yanki.reports.interfaces.rest.dto.CustomerReportResponse;
 import com.yanki.reports.interfaces.rest.dto.CustomerSummaryResponse;
 import com.yanki.reports.interfaces.rest.dto.DailyAggregateResponse;
@@ -79,6 +82,7 @@ public class ReportController {
     private final GetCustomerReportUseCase getCustomerReportUseCase;
     private final GetCardMovementsUseCase getCardMovementsUseCase;
     private final GetCustomerSummaryUseCase getCustomerSummaryUseCase;
+    private final GetCustomer360UseCase getCustomer360UseCase;
     private final GetProductSummaryUseCase getProductSummaryUseCase;
     private final GetDailyAggregatesUseCase getDailyAggregatesUseCase;
 
@@ -374,6 +378,71 @@ public class ReportController {
             );
         } catch (Exception ex) {
             log.error("Error inesperado obteniendo resumen de cliente: customerId={}", customerId, ex);
+            throw ex;
+        }
+    }
+
+    /**
+     * Obtiene la vista 360° completa de un cliente con productos y eventos recientes.
+     *
+     * @param customerId identificador del cliente
+     * @return vista 360° con resumen, productos detallados y eventos recientes
+     */
+    @Operation(
+            summary = "Vista 360° completa del cliente",
+            description = "Obtiene la vista completa de un cliente combinando el resumen consolidado, "
+                    + "la lista detallada de productos (cuentas, tarjetas, créditos, wallets) con su estado actual, "
+                    + "y los últimos eventos registrados.\n\n"
+                    + "La respuesta incluye:\n"
+                    + "- **customerId**: Identificador del cliente\n"
+                    + "- **customerType**: Tipo de cliente (NATURAL, JURIDICA)\n"
+                    + "- **profile**: Perfil (PERSONAL, VIP, PYME, EMPRESARIAL)\n"
+                    + "- **status**: Estado (ACTIVE, INACTIVE, BLOCKED)\n"
+                    + "- **totalAccounts/totalCards/totalCredits/totalWallets**: Contadores de productos\n"
+                    + "- **totalBalanceAccounts**: Saldo total en cuentas bancarias\n"
+                    + "- **totalCreditLimit/totalCreditDebt**: Límite y deuda de créditos\n"
+                    + "- **totalWalletBalance**: Saldo total en wallets\n"
+                    + "- **hasOverdueDebt**: Indica si tiene deudas vencidas\n"
+                    + "- **products**: Lista detallada de productos con estado, saldos y límites\n"
+                    + "- **recentEvents**: Últimos 20 eventos del cliente (ordenados por fecha descendente)\n\n"
+                    + "**Casos de uso:** Dashboard de cliente, atención al cliente, análisis de cross-selling, "
+                    + "scoring crediticio.\n\n"
+                    + "**Fuente:** Proyecciones MongoDB materializadas por eventos Kafka "
+                    + "(customer_summary, product_summary, product_events)."
+    )
+    @Parameters({
+            @Parameter(name = "customerId", in = ParameterIn.PATH, required = true,
+                    description = "Identificador único del cliente",
+                    example = "6af39f59b089e973a5ffe9b6",
+                    schema = @io.swagger.v3.oas.annotations.media.Schema(type = "string"))
+    })
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Vista 360° del cliente obtenida exitosamente",
+                    content = @io.swagger.v3.oas.annotations.media.Content(
+                            mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @io.swagger.v3.oas.annotations.media.Schema(implementation = Customer360Response.class))),
+            @ApiResponse(responseCode = "404", description = "Cliente no encontrado: no hay resumen materializado para este customerId"),
+            @ApiResponse(responseCode = "401", description = "No autorizado: token JWT inválido o expirado"),
+            @ApiResponse(responseCode = "403", description = "Prohibido: rol sin permiso para ver vista 360° del cliente"),
+            @ApiResponse(responseCode = "500", description = "Error interno consultando MongoDB"),
+            @ApiResponse(responseCode = "503", description = "Servicio no disponible: lag Kafka alto (proyección degradada)")
+    })
+    @GetMapping("/customer-360/{customerId}")
+    public Mono<Customer360Response> getCustomer360(
+            @PathVariable @NotBlank final String customerId) {
+
+        log.info("Solicitud de vista 360° del cliente: customerId={}", customerId);
+        try {
+            return RxJava3Adapter.maybeToMono(
+                    getCustomer360UseCase.execute(customerId)
+                            .map(customer360 -> {
+                                log.info("Vista 360° del cliente obtenida exitosamente: customerId={}, products={}, events={}",
+                                        customerId, customer360.getProducts().size(), customer360.getRecentEvents().size());
+                                return Customer360Response.fromDomain(customer360);
+                            })
+            );
+        } catch (Exception ex) {
+            log.error("Error inesperado obteniendo vista 360° del cliente: customerId={}", customerId, ex);
             throw ex;
         }
     }

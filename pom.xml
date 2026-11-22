@@ -25,7 +25,7 @@
     <springdoc.version>2.6.0</springdoc.version>
     <resilience4j.version>2.2.0</resilience4j.version>
     <rxjava.version>3.1.10</rxjava.version>
-    <lombok.version>1.18.34</lombok.version>
+    <lombok.version>1.18.48</lombok.version>
     <jjwt.version>0.12.6</jjwt.version>
     <checkstyle.plugin.version>3.5.0</checkstyle.plugin.version>
     <checkstyle.version>10.21.1</checkstyle.version>
@@ -143,6 +143,13 @@
         <configuration>
           <release>17</release>
           <parameters>true</parameters>
+          <annotationProcessorPaths>
+            <path>
+              <groupId>org.projectlombok</groupId>
+              <artifactId>lombok</artifactId>
+              <version>${lombok.version}</version>
+            </path>
+          </annotationProcessorPaths>
         </configuration>
       </plugin>
       <plugin>

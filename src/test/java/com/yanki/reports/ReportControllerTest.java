@@ -12,6 +12,7 @@ import com.yanki.reports.domain.model.ProductGroup;
 import com.yanki.reports.domain.model.ProductSummary;
 import com.yanki.reports.domain.port.in.GenerateAggregatedReportUseCase;
 import com.yanki.reports.domain.port.in.GetCardMovementsUseCase;
+import com.yanki.reports.domain.port.in.GetCustomer360UseCase;
 import com.yanki.reports.domain.port.in.GetCustomerReportUseCase;
 import com.yanki.reports.domain.port.in.GetCustomerSummaryUseCase;
 import com.yanki.reports.domain.port.in.GetDailyAggregatesUseCase;
@@ -54,6 +55,7 @@ class ReportControllerTest {
     private GetCustomerReportUseCase getCustomerReportUseCase;
     private GetCardMovementsUseCase getCardMovementsUseCase;
     private GetCustomerSummaryUseCase getCustomerSummaryUseCase;
+    private GetCustomer360UseCase getCustomer360UseCase;
     private GetProductSummaryUseCase getProductSummaryUseCase;
     private GetDailyAggregatesUseCase getDailyAggregatesUseCase;
     private WebTestClient webTestClient;
@@ -65,6 +67,7 @@ class ReportControllerTest {
         getCustomerReportUseCase = Mockito.mock(GetCustomerReportUseCase.class);
         getCardMovementsUseCase = Mockito.mock(GetCardMovementsUseCase.class);
         getCustomerSummaryUseCase = Mockito.mock(GetCustomerSummaryUseCase.class);
+        getCustomer360UseCase = Mockito.mock(GetCustomer360UseCase.class);
         getProductSummaryUseCase = Mockito.mock(GetProductSummaryUseCase.class);
         getDailyAggregatesUseCase = Mockito.mock(GetDailyAggregatesUseCase.class);
 
@@ -74,6 +77,7 @@ class ReportControllerTest {
                 getCustomerReportUseCase,
                 getCardMovementsUseCase,
                 getCustomerSummaryUseCase,
+                getCustomer360UseCase,
                 getProductSummaryUseCase,
                 getDailyAggregatesUseCase
         );
