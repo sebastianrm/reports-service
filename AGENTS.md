@@ -2,10 +2,10 @@
 
 ## Agent Identity
 - **Name**: `yanki-reports-agent`
-- **Version**: 1.1.0
+- **Version**: 1.2.0
 - **Service**: `reports-service` (Port 8088)
 - **Part**: II / III (Plataforma + Event-Driven Analytics)
-- **Estado**: ✅ Completo (7/7 endpoints)
+- **Estado**: ✅ Completo (8/8 endpoints)
 
 ---
 
@@ -17,7 +17,7 @@
 - **Programación reactiva end-to-end**: Project Reactor (WebFlux) + RxJava 3.1.10 (servicios: `Single`/`Maybe`/`Completable`/`Flowable`)
 - **Spring Data MongoDB Reactive**: `ReactiveMongoRepository` con métodos derivados, **sin `@Query`**, agregaciones con `ReactiveMongoTemplate` + Aggregation Framework
 - **Spring Data Redis Reactive**: Cache distribuido (reportes frecuentes, TTL 5m)
-- **Spring Kafka**: Consumidor reactivo **20 topics**, **cero productores**, idempotencia (`<topic>:<entityId>:<occurredAt>` en `processed_events`), serialización JSON
+- **Spring Kafka**: Consumidor reactivo **19 topics**, **cero productores**, idempotencia (`<topic>:<entityId>:<occurredAt>` en `processed_events`), serialización JSON
 - **Spring Cloud Config Client**: Configuración externalizada, fail-fast, retry con backoff
 - **Spring Cloud Netflix Eureka Client**: Registro, heartbeat, metadata (zone, version)
 - **Resilience4j**: CircuitBreaker (timeout 2s), TimeLimiter, Bulkhead
@@ -48,10 +48,13 @@ Servicio **solo lectura / analítica** que consume **TODOS los eventos de domini
 2. **Reportes obligatorios (Parte II)**:
    - **Reporte de producto**: Eventos de producto en rango de fechas (`GET /api/reports/products?from=&to=`) — *streaming global* ✅
    - **Últimos 10 movimientos de tarjeta**: `GET /api/reports/movements/cards/{cardId}?limit=10` — ✅ **Completo**
-3. **Reportes implementados**:
+3. **Reportes implementados (8 endpoints)**:
    - Reporte agregado por tipo/fecha/cliente (`GET /api/reports/aggregated`) ✅
-   - Vista 360° cliente (`GET /api/reports/customers/{customerId}`) ✅
+   - Eventos de producto por rango (`GET /api/reports/products`) ✅
+   - Vista 360° cliente con eventos (`GET /api/reports/customers/{customerId}`) ✅
+   - Últimos movimientos tarjeta (`GET /api/reports/movements/cards/{cardId}`) ✅
    - Resumen 360° cliente desde colección (`GET /api/reports/customer-summary/{customerId}`) ✅
+   - **Vista 360° completa del cliente** (`GET /api/reports/customer-360/{customerId}`) ✅ — *Nuevo: combina resumen, productos y eventos recientes*
    - Resumen de producto específico (`GET /api/reports/products/{productId}`) ✅
    - Agregados diarios para dashboards (`GET /api/reports/daily-aggregates`) ✅
 4. **Reportes pendientes (Backlog)**:
@@ -70,7 +73,7 @@ Servicio **solo lectura / analítica** que consume **TODOS los eventos de domini
 | **Reactive** | Project Reactor (web), RxJava 3.1.10 (servicios) |
 | **Data** | Spring Data MongoDB Reactive (`yanki_reports` - solo `product_events`) |
 | **Cache** | Spring Data Redis Reactive (reportes frecuentes, TTL 5m) |
-| **Messaging** | Spring Kafka (consumidor **20 topics**, **cero productores**) |
+| **Messaging** | Spring Kafka (consumidor **19 topics**, **cero productores**) |
 | **Aggregations** | ReactiveMongoTemplate + Aggregation Framework (sin @Query) |
 | **API Docs** | springdoc-openapi 2.6.0 |
 | **Resilience** | Resilience4j CircuitBreaker (2s) - solo para cache/DB |
@@ -80,18 +83,19 @@ Servicio **solo lectura / analítica** que consume **TODOS los eventos de domini
 
 ## Communication Protocols
 
-### REST (Inbound - Solo Lectura - 7 Endpoints Implementados)
+### REST (Inbound - Solo Lectura - 8 Endpoints Implementados)
 | Method | Endpoint | Description | Parámetros |
 |--------|----------|-------------|------------|
 | `GET` | `/api/reports/aggregated` | Reporte agregado por tipo producto y rango | `type*`, `from*`, `to*`, `customerType*` |
-| `GET` | `/api/reports/products` | Eventos producto por rango (streaming Flux) | `from*`, `to*` |
+| `GET` | `/api/reports/products` | Eventos producto por rango (streaming Flux) | `from*`, `to*`, `startDate` (alias), `endDate` (alias) |
 | `GET` | `/api/reports/products/{productId}` | Resumen de producto específico | Path: `productId` |
-| `GET` | `/api/reports/customers/{customerId}` | Reporte completo cliente (vista 360°) | Path: `customerId` |
+| `GET` | `/api/reports/customers/{customerId}` | Reporte completo cliente (vista 360° con eventos) | Path: `customerId` |
 | `GET` | `/api/reports/customer-summary/{customerId}` | Resumen 360° del cliente (colección customer_summary) | Path: `customerId` |
+| `GET` | `/api/reports/customer-360/{customerId}` | **Vista 360° completa** (resumen + productos + eventos recientes) | Path: `customerId` |
 | `GET` | `/api/reports/movements/cards/{cardId}` | Últimos movimientos tarjeta (req. Parte II) | Path: `cardId`, Query: `limit` (def 10) |
 | `GET` | `/api/reports/daily-aggregates` | Agregados diarios (dashboards/analytics) | `date*`, `productType` (opcional) |
 
-### Kafka (Inbound - Consumidor de 20 Topics)
+### Kafka (Inbound - Consumidor de 19 Topics)
 | Topic | Payload | Proyección en `product_events` |
 |-------|---------|--------------------------------|
 | `yanki.customer.registered.v1` | `CustomerRegisteredEvent` | `CUSTOMER_REGISTERED` |
@@ -209,7 +213,7 @@ healthcheck:
   interval: 10s
   timeout: 5s
   retries: 5
-  start_period: 60s  # Más tiempo por suscripción a 20 topics
+  start_period: 60s  # Más tiempo por suscripción a 19 topics
 ```
 
 ### Dependencies
@@ -239,7 +243,7 @@ depends_on:
 | `reports.queries.executed` | Counter | Consultas REST por endpoint |
 | `reports.query.latency` | Timer | Latencia consultas (p50, p95, p99) |
 | `reports.cache.hit_ratio` | Gauge | Ratio aciertos cache Redis |
-| `reports.lag.max` | Gauge | Max consumer lag across 20 topics |
+| `reports.lag.max` | Gauge | Max consumer lag across 19 topics |
 
 ### Distributed Tracing
 - Trace: `ingestedAt` + `eventId` correlacionado con productores
@@ -249,14 +253,14 @@ depends_on:
 
 ## Agent Lifecycle
 
-### Startup Sequence (Crítico: 20 Topics)
+### Startup Sequence (Crítico: 19 Topics)
 1. Config Server → Eureka → MongoDB (crear índices `product_events`)
-2. Redis → Kafka (consumer group `reports-service`, **suscribir 20 topics**)
+2. Redis → Kafka (consumer group `reports-service`, **suscribir 19 topics**)
 3. **Verificar lag = 0** en todos los topics (o procesar backlog)
 4. HTTP server 8088
 
 ### Shutdown
-1. Deregister Eureka → **Commit offsets sincrónico en 20 topics** → Cerrar conexiones
+1. Deregister Eureka → **Commit offsets sincrónico en 19 topics** → Cerrar conexiones
 
 ---
 
@@ -300,7 +304,7 @@ mvn clean verify
 
 ---
 
-## Idempotencia (Crítico para 20 Topics)
+## Idempotencia (Crítico para 19 Topics)
 - **Clave**: `<topic>:<aggregateId>:<occurredAt>` en colección `processed_events` (única)
 - **Duplicados**: Se descartan silenciosamente, métrica `reports.events.duplicates`++
 - **Backfill**: Reset offsets → reprocesa todo (idempotencia garantiza consistencia)
@@ -308,11 +312,12 @@ mvn clean verify
 ---
 
 ## Testing Strategy
-- **Unit**: `ReportService` (agregaciones MongoDB, consultas optimizadas, mapeo DTOs)
+- **Unit**: Servicios de dominio (`GetCustomer360Service`, `GetCardMovementsService`, etc.), mapeo DTOs, validadores
 - **Integration**: Controller (`WebTestClient` - ver `ReportControllerTest.java`), Repository (`@DataMongoTest`)
-- **Event**: EmbeddedKafka (20 topics, verificar proyección `product_events` y descarte duplicados)
-- **Contract**: Pact consumer para 20 topics (verificar schema payload)
-- **Performance**: Carga reportes agregados con dataset grande
+- **Event**: `ReportsEventConsumerTest` (verificar ingesta en `product_events` y descarte duplicados en `processed_events`)
+- **Infra**: `InfrastructureConfigTest`, `ProcessedEventAdapterTest`
+- **Fixtures**: `MockFixtures.java` para datos de prueba reutilizables
+- **Test Cases QA**: `test-cases/` con 7 casos (CP-123, CP-124, CP-125)
 
 ### Cobertura mínima por endpoint (Regla de Oro)
 Cada endpoint debe contar con:
@@ -375,7 +380,7 @@ curl -s http://localhost:8088/actuator/metrics/reports.events.ingested | jq '.me
 ## Part III Specifics (Read-Only Event Consumer)
 - **Cero productores Kafka** — Solo consumidor
 - **Cero llamadas REST salientes** — Fuente única: `product_events`
-- **20 subscriptions** — Requiere recursos (heap, connections, threads)
+- **19 subscriptions** — Requiere recursos (heap, connections, threads)
 - **Idempotencia obligatoria** — Exactly-once logical en `product_events`
 - **CQRS puro** — Write path = Kafka → Mongo; Read path = REST → Mongo/Redis
 
@@ -436,7 +441,7 @@ curl -s http://localhost:8088/actuator/metrics/reports.events.ingested | jq '.me
 - [ ] Cobertura JaCoCo >= threshold
 - [ ] Referencias bidireccionales actualizadas (CU-13, SEC011, CP-123/124/125)
 - [ ] RTM.md sincronizado si hay cambios en endpoints
-- [ ] README.md y AGENTS.md reflejan endpoints REALES (7 implementados)
+- [ ] README.md y AGENTS.md reflejan endpoints REALES (8 implementados)
 
 > **⚠️ Excluido:** Checkstyle no se ejecuta como quality gate (deuda técnica conocida).
 

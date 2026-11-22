@@ -9,7 +9,7 @@ Servicio **solo lectura / analítica** que consume **todos los eventos de domini
 - **Colección principal:** `product_events`
 - **Colección técnica:** `processed_events` (idempotencia)
 - **Cache:** Redis (TTL por defecto `5m`)
-- **Naturaleza:** Inbound REST de solo lectura + consumo Kafka de 20 tópicos
+- **Naturaleza:** Inbound REST de solo lectura + consumo Kafka de 19 tópicos
 - **Outbound:** Ninguno por REST y ninguno por Kafka
 
 ---
@@ -28,7 +28,7 @@ Servicio **solo lectura / analítica** que consume **todos los eventos de domini
 5. Mantener **proyección global** de todos los eventos de dominio via Kafka.
 
 ### Objetivos técnicos
-1. Consumir eventos de dominio desde Kafka (20 tópicos).
+1. Consumir eventos de dominio desde Kafka (19 tópicos).
 2. Persistir una proyección analítica en MongoDB (`product_events`).
 3. Mantener **idempotencia** al reprocesar eventos (`processed_events`).
 4. Servir consultas optimizadas usando índices y cache Redis.
@@ -48,7 +48,7 @@ Servicio **solo lectura / analítica** que consume **todos los eventos de domini
 | Reactividad de dominio | RxJava | 3.1.10 |
 | Persistencia | Spring Data MongoDB Reactive | `ReactiveMongoRepository` + `ReactiveMongoTemplate` |
 | Caché | Spring Data Redis Reactive | TTL configurable |
-| Mensajería | Spring Kafka | Consumidor de 20 tópicos |
+| Mensajería | Spring Kafka | Consumidor de 19 tópicos |
 | Documentación API | springdoc-openapi | 2.6.0 |
 | Resiliencia | Resilience4j | timeout `2s`, circuit breaker, time limiter, bulkhead |
 | Calidad | Checkstyle | 10.21.1 (deuda técnica — plugin no se ejecuta) |
@@ -82,7 +82,7 @@ Cada evento de negocio consumido desde Kafka se transforma en un documento homog
 - período,
 - tipo de evento.
 
-### 3.2 Qué reportes resuelve (Estado actual - 7 endpoints implementados)
+### 3.2 Qué reportes resuelve (Estado actual - 8 endpoints implementados)
 
 #### A. Reporte agregado por tipo de producto (`GET /api/reports/aggregated`)
 Expone métricas analíticas agregadas por:
@@ -97,8 +97,9 @@ Métricas:
 
 #### B. Eventos de producto por rango de fechas (`GET /api/reports/products`)
 Retorna **flujo reactivo** (server-sent events) de todos los eventos proyectados en un rango de fechas.
-- Query params obligatorios: `from`, `to` (formato ISO-8601 date)
-- Respuesta: `application/stream+json` (Flux de `ProductEventResponse`)
+- Query params: `from`, `to` (con valores por defecto: `2020-01-01` y `2099-12-31`)
+- Alias compatibles: `startDate` / `endDate` (si se proporcionan, sobrescriben `from`/`to`)
+- Respuesta: `application/x-ndjson` (Flux de `ProductEventResponse`)
 - Caso de uso: Auditoría, reconstrucción de estado, debugging de proyecciones.
 
 #### C. Reporte completo de cliente / Vista 360° (`GET /api/reports/customers/{customerId}`)
@@ -113,19 +114,25 @@ Agrega todos los productos (cuentas, tarjetas, créditos, wallets) asociados a u
 - Retorna `CardMovementsResponse` con cardId, productType, subType (CREDIT/DEBIT), movements[].
 
 #### E. Resumen 360° del cliente (`GET /api/reports/customer-summary/{customerId}`)
-Consulta la colección `customer_summary` para obtener un resumen consolidado del cliente: conteo de productos por tipo, montos totales, eventos recientes.
-- Retorna `CustomerSummaryResponse` con 14 campos: customerId, customerType, profile, status, accountsCount, cardsCount, creditsCount, walletsCount, totalEvents, totalAmount, lastActivityAt, createdAt, updatedAt.
+Consulta la colección `customer_summary` para obtener un resumen consolidado del cliente.
+- Retorna `CustomerSummaryResponse` con 15 campos: `customerId`, `customerType`, `profile`, `status`, `totalAccounts`, `totalCards`, `totalCredits`, `totalWallets`, `totalBalanceAccounts`, `totalCreditLimit`, `totalCreditDebt`, `totalWalletBalance`, `hasOverdueDebt`, `lastMovementAt`, `updatedAt`.
 - Fuente de datos: Colección `customer_summary` (materializada desde eventos Kafka).
 
-#### F. Resumen de producto específico (`GET /api/reports/products/{productId}`)
-Consulta la colección `product_summary` para obtener un resumen consolidado de un producto específico: estado, montos, eventos asociados.
-- Retorna `ProductSummaryResponse` con 14 campos: productId, productType, subType, status, customerId, currentBalance, totalEvents, totalAmount, lastEventAt, currency, openedAt, closedAt, createdAt, updatedAt.
+#### F. Vista 360° completa del cliente (`GET /api/reports/customer-360/{customerId}`)
+**Nuevo endpoint**: Combina el resumen consolidado del cliente, la lista detallada de productos con su estado actual, y los últimos eventos registrados.
+- Retorna `Customer360Response` con: resumen del cliente (15 campos), `products[]` (lista de `ProductSummaryResponse` con estado, saldos y límites), `recentEvents[]` (últimos 20 eventos como `ProductEventResponse`).
+- Fuente de datos: Proyecciones MongoDB (`customer_summary`, `product_summary`, `product_events`).
+- Caso de uso: Dashboard de cliente, atención al cliente, análisis de cross-selling, scoring crediticio.
+
+#### G. Resumen de producto específico (`GET /api/reports/products/{productId}`)
+Consulta la colección `product_summary` para obtener el estado actual de un producto bancario.
+- Retorna `ProductSummaryResponse` con 13 campos: `productId`, `productType`, `subType`, `customerId`, `status`, `currentBalance`, `creditLimit`, `availableLimit`, `outstandingBalance`, `currency`, `openedAt`, `closedAt`, `lastMovementAt`, `updatedAt`.
 - Fuente de datos: Colección `product_summary` (materializada desde eventos Kafka).
 
-#### G. Agregados diarios (`GET /api/reports/daily-aggregates`)
+#### H. Agregados diarios (`GET /api/reports/daily-aggregates`)
 Consulta la colección `daily_aggregates` para obtener métricas diarias consolidadas: útil para dashboards y analytics.
-- Retorna lista de `DailyAggregateResponse` con 10 campos: date, productType, eventCount, totalAmount, averageAmount, minAmount, maxAmount, uniqueCustomers, uniqueAggregates, generatedAt.
-- Query params: `date*` (obligatorio, ISO-8601), `productType` (opcional, actualmente ignorado).
+- Retorna lista de `DailyAggregateResponse` con 10 campos: `id` (clave compuesta `YYYY-MM-DD:PRODUCT_TYPE:CUSTOMER_TYPE`), `date`, `productType`, `customerType`, `movementCount`, `totalAmount`, `avgAmount`, `uniqueCustomers`, `uniqueProducts`, `updatedAt`.
+- Query params: `date*` (obligatorio, ISO-8601), `productType` (opcional, actualmente ignorado en el controller).
 - Fuente de datos: Colección `daily_aggregates` (materializada desde eventos Kafka).
 
 ### 3.3 Reportes NO implementados aún (Backlog)
@@ -150,7 +157,7 @@ Consulta la colección `daily_aggregates` para obtener métricas diarias consoli
 `Kafka event → ReportsEventConsumer → validación/idempotencia → normalización → product_events / processed_events`
 
 ### Flujo de lectura
-`HTTP GET → ReportController → ReportService → Redis Cache / Mongo Aggregation → Response DTO`
+`HTTP GET → ReportController → UseCase (domain.port.in) → Service (domain.service) → PersistencePort → Adapter → Redis Cache / Mongo Aggregation → Response DTO`
 
 ### Fuente de verdad del servicio
 - **Operacional del servicio:** `product_events`
@@ -160,29 +167,109 @@ Consulta la colección `daily_aggregates` para obtener métricas diarias consoli
 ```
 src/main/java/com/yanki/reports
 ├── domain
-│   ├── model           # Entidades puras (ProductEvent, ProcessedEvent) - SIN anotaciones Spring
+│   ├── model           # Entidades puras - SIN anotaciones Spring
+│   │   ├── ProductEvent.java
+│   │   ├── ProcessedEvent.java
+│   │   ├── AggregatedReport.java
+│   │   ├── CardMovementsReport.java
+│   │   ├── CustomerReport.java
+│   │   ├── CustomerSummary.java      # Resumen consolidado del cliente
+│   │   ├── Customer360.java          # Vista 360° completa (nuevo)
+│   │   ├── ProductSummary.java       # Estado actual del producto
+│   │   ├── DailyAggregate.java       # Agregados diarios
+│   │   └── ProductGroup.java
 │   ├── port
-│   │   ├── in          # ReportServicePort (puerto de entrada)
-│   │   └── out         # ProductEventRepositoryPort, CachePort (puertos de salida)
-│   ├── service         # ReportService (lógica de dominio, usa puertos de salida)
-│   ├── event           # Eventos de dominio consumidos
+│   │   ├── in          # Use Cases (puertos de entrada)
+│   │   │   ├── GenerateAggregatedReportUseCase.java
+│   │   │   ├── GetProductEventsByDateRangeUseCase.java
+│   │   │   ├── GetCustomerReportUseCase.java
+│   │   │   ├── GetCardMovementsUseCase.java
+│   │   │   ├── GetCustomerSummaryUseCase.java
+│   │   │   ├── GetCustomer360UseCase.java        # Nuevo
+│   │   │   ├── GetProductSummaryUseCase.java
+│   │   │   ├── GetDailyAggregatesUseCase.java
+│   │   │   └── IngestEventUseCase.java
+│   │   └── out         # Puertos de salida (interfaces)
+│   │       ├── ProductEventPersistencePort.java
+│   │       ├── CustomerSummaryPersistencePort.java
+│   │       ├── ProductSummaryPersistencePort.java
+│   │       ├── DailyAggregatePersistencePort.java
+│   │       ├── ProcessedEventPort.java
+│   │       ├── CachePort.java
+│   │       └── KafkaLagPort.java
+│   ├── service         # Implementaciones de Use Cases (lógica de dominio)
+│   │   ├── GenerateAggregatedReportService.java
+│   │   ├── GetProductEventsByDateRangeService.java
+│   │   ├── GetCustomerReportService.java
+│   │   ├── GetCardMovementsService.java
+│   │   ├── GetCustomerSummaryService.java
+│   │   ├── GetCustomer360Service.java            # Nuevo
+│   │   ├── GetProductSummaryService.java
+│   │   ├── GetDailyAggregatesService.java
+│   │   └── IngestEventService.java
+│   ├── event           # Eventos de dominio consumidos (19 tipos)
 │   └── exception       # Excepciones de dominio
+│       ├── BusinessException.java
+│       ├── InvalidDateRangeException.java
+│       ├── KafkaLagHighException.java
+│       └── ProductNotFoundException.java
 ├── infrastructure
-│   ├── config          # Configuración (Kafka, Mongo, Redis, OpenAPI)
+│   ├── config          # Configuración
+│   │   ├── InfrastructureConfig.java
+│   │   ├── KafkaConsumerConfig.java    # 19 container factories (1 por tipo de evento)
+│   │   └── OpenApiConfig.java
 │   ├── persistence
-│   │   ├── mongo       # ProductEventRepository (implementa puerto), ProductEventDocument
-│   │   └── redis       # CacheAdapter (implementa puerto)
-│   └── messaging       # ReportsEventConsumer (consumidor Kafka)
+│   │   ├── adapter     # Adaptadores de persistencia (implementan puertos de salida)
+│   │   │   ├── ProductEventPersistenceAdapter.java
+│   │   │   ├── CustomerSummaryPersistenceAdapter.java
+│   │   │   ├── ProductSummaryPersistenceAdapter.java
+│   │   │   ├── DailyAggregatePersistenceAdapter.java
+│   │   │   ├── ProcessedEventAdapter.java
+│   │   │   └── RedisCacheAdapter.java
+│   │   ├── document    # Documentos MongoDB (con anotaciones @Document)
+│   │   │   ├── ProductEventDocument.java
+│   │   │   ├── CustomerSummaryDocument.java
+│   │   │   ├── ProductSummaryDocument.java
+│   │   │   ├── DailyAggregateDocument.java
+│   │   │   └── ProcessedEventDocument.java
+│   │   ├── mapper      # Mapeadores Document ↔ Domain
+│   │   │   ├── ProductEventDocumentMapper.java
+│   │   │   ├── CustomerSummaryDocumentMapper.java
+│   │   │   ├── ProductSummaryDocumentMapper.java
+│   │   │   ├── DailyAggregateDocumentMapper.java
+│   │   │   └── ProcessedEventDocumentMapper.java
+│   │   └── repository  # Spring Data Reactive Repositories
+│   │       ├── SpringDataProductEventRepository.java
+│   │       ├── SpringDataCustomerSummaryRepository.java
+│   │       ├── SpringDataProductSummaryRepository.java
+│   │       ├── SpringDataDailyAggregateRepository.java
+│   │       └── SpringDataProcessedEventRepository.java
+│   └── messaging
+│       ├── adapter     # Adaptadores de mensajería
+│       │   └── KafkaLagAdapter.java
+│       └── consumer    # Consumidor Kafka
+│           └── ReportsEventConsumer.java   # 19 @KafkaListener methods
 └── interfaces
     └── rest
-        ├── controller  # ReportController (adaptador entrada)
-        ├── dto         # DTOs de respuesta (AggregatedReportResponse, etc.)
+        ├── controller  # ReportController (8 endpoints)
+        ├── dto         # DTOs de respuesta
+        │   ├── AggregatedReportResponse.java
+        │   ├── CardMovementsResponse.java
+        │   ├── CustomerReportResponse.java
+        │   ├── CustomerSummaryResponse.java
+        │   ├── Customer360Response.java        # Nuevo
+        │   ├── ProductSummaryResponse.java
+        │   ├── DailyAggregateResponse.java
+        │   ├── ProductEventResponse.java
+        │   ├── ProductGroupResponse.java
+        │   └── DateRange.java
+        ├── ApiError.java
         └── GlobalExceptionHandler.java
 ```
 
 ---
 
-## 5. Endpoints REST (7 Implementados)
+## 5. Endpoints REST (8 Implementados)
 
 Base URL: `/api/reports`
 
@@ -191,10 +278,11 @@ Base URL: `/api/reports`
 | Método | Endpoint | Descripción | Parámetros |
 |---|---|---|---|
 | `GET` | `/api/reports/aggregated` | Reporte agregado por tipo producto | `type*` (ACCOUNT/CARD/CREDIT/WALLET), `from*` (date), `to*` (date), `customerType*` (NATURAL/JURIDICA) |
-| `GET` | `/api/reports/products` | Eventos de producto por rango (streaming) | `from*` (date), `to*` (date) |
+| `GET` | `/api/reports/products` | Eventos de producto por rango (streaming) | `from` (date, def: 2020-01-01), `to` (date, def: 2099-12-31), `startDate`/`endDate` (alias) |
 | `GET` | `/api/reports/products/{productId}` | Resumen de producto específico (colección product_summary) | Path: `productId` |
-| `GET` | `/api/reports/customers/{customerId}` | Reporte completo cliente (vista 360°) | Path: `customerId` |
+| `GET` | `/api/reports/customers/{customerId}` | Reporte completo cliente (vista 360° con eventos) | Path: `customerId` |
 | `GET` | `/api/reports/customer-summary/{customerId}` | Resumen 360° del cliente (colección customer_summary) | Path: `customerId` |
+| `GET` | `/api/reports/customer-360/{customerId}` | **Vista 360° completa** (resumen + productos + eventos recientes) | Path: `customerId` |
 | `GET` | `/api/reports/movements/cards/{cardId}` | Últimos movimientos tarjeta (req. Parte II) | Path: `cardId`, Query: `limit` (default 10) |
 | `GET` | `/api/reports/daily-aggregates` | Agregados diarios (dashboards/analytics) | `date*` (date), `productType` (opcional) |
 
@@ -398,6 +486,10 @@ curl -H "Authorization: Bearer <token>" \
 curl -H "Authorization: Bearer <token>" \
   "http://localhost:8088/api/reports/customer-summary/6af39f59b089e973a5ffe9b6"
 
+# Vista 360° completa del cliente (resumen + productos + eventos)
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8088/api/reports/customer-360/6af39f59b089e973a5ffe9b6"
+
 # Resumen de producto específico (colección product_summary)
 curl -H "Authorization: Bearer <token>" \
   "http://localhost:8088/api/reports/products/PRODUCT-12345"
@@ -409,9 +501,11 @@ curl -H "Authorization: Bearer <token>" \
 
 ---
 
-## 8. Eventos Kafka consumidos (20 tópicos)
+## 8. Eventos Kafka consumidos (19 tópicos)
 
 > `reports-service` **no produce eventos**. Solo consume y proyecta.
+>
+> Los 19 tópicos provienen de **6 microservicios distintos**: customers-service (3), accounts-service (3), cards-service (3), credits-service (3), wallet-service (4), transfers-service (2), y 1 evento de pagos débito.
 
 | Topic | Payload | Proyección en `product_events` |
 |---|---|---|
@@ -474,14 +568,16 @@ public class CustomerSummary {
     String customerType;          // NATURAL, JURIDICA
     String profile;               // PERSONAL, VIP, PYME, EMPRESARIAL
     String status;                // ACTIVE, INACTIVE, BLOCKED
-    int accountsCount;
-    int cardsCount;
-    int creditsCount;
-    int walletsCount;
-    int totalEvents;
-    BigDecimal totalAmount;
-    LocalDateTime lastActivityAt;
-    LocalDateTime createdAt;
+    Integer totalAccounts;        // Total de cuentas bancarias activas
+    Integer totalCards;           // Total de tarjetas activas
+    Integer totalCredits;         // Total de créditos activos
+    Integer totalWallets;         // Total de wallets activas
+    BigDecimal totalBalanceAccounts;  // Saldo total en cuentas
+    BigDecimal totalCreditLimit;      // Límite total de crédito
+    BigDecimal totalCreditDebt;       // Deuda total en créditos
+    BigDecimal totalWalletBalance;    // Saldo total en wallets
+    Boolean hasOverdueDebt;     // Indica si tiene deudas vencidas
+    LocalDateTime lastMovementAt;
     LocalDateTime updatedAt;
 }
 ```
@@ -492,17 +588,17 @@ public class CustomerSummary {
 public class ProductSummary {
     String productId;
     String productType;           // ACCOUNT, CARD, CREDIT, WALLET
-    String subType;               // SAVINGS, CREDIT, DEBIT, etc.
-    String status;                // OPEN, ACTIVE, CLOSED, BLOCKED, OVERDUE
+    String subType;               // SAVINGS, CREDIT, DEBIT, PERSONAL_LOAN, etc.
     String customerId;
-    BigDecimal currentBalance;
-    int totalEvents;
-    BigDecimal totalAmount;
-    LocalDateTime lastEventAt;
+    String status;                // OPEN, ACTIVE, CLOSED, BLOCKED, OVERDUE
+    BigDecimal currentBalance;    // Saldo actual (cuentas y wallets)
+    BigDecimal creditLimit;       // Límite de crédito (tarjetas)
+    BigDecimal availableLimit;    // Límite disponible (tarjetas)
+    BigDecimal outstandingBalance;// Saldo pendiente (créditos)
     String currency;              // PEN, USD
     LocalDateTime openedAt;
     LocalDateTime closedAt;
-    LocalDateTime createdAt;
+    LocalDateTime lastMovementAt;
     LocalDateTime updatedAt;
 }
 ```
@@ -511,16 +607,44 @@ public class ProductSummary {
 ```java
 // domain/model/DailyAggregate.java (SIN anotaciones Spring/Mongo)
 public class DailyAggregate {
+    String id;                    // Clave compuesta: YYYY-MM-DD:PRODUCT_TYPE:CUSTOMER_TYPE
     LocalDate date;
-    String productType;           // ACCOUNT, CARD, CREDIT, WALLET (o null para todos)
-    int eventCount;
-    BigDecimal totalAmount;
-    BigDecimal averageAmount;
-    BigDecimal minAmount;
-    BigDecimal maxAmount;
-    int uniqueCustomers;
-    int uniqueAggregates;
-    LocalDateTime generatedAt;
+    String productType;           // ACCOUNT, CARD, CREDIT, WALLET
+    String customerType;          // NATURAL, JURIDICA
+    Integer movementCount;        // Cantidad total de movimientos
+    BigDecimal totalAmount;       // Monto total acumulado
+    BigDecimal avgAmount;         // Monto promedio por movimiento
+    Integer uniqueCustomers;      // Clientes únicos con movimientos
+    Integer uniqueProducts;       // Productos únicos con movimientos
+    LocalDateTime updatedAt;      // Timestamp de última actualización
+}
+```
+
+### Colección `customer_360` (Vista derivada)
+
+> La vista 360° completa no tiene colección propia; se construye combinando
+> `customer_summary`, `product_summary` y `product_events` en tiempo de consulta.
+
+```java
+// domain/model/Customer360.java (SIN anotaciones Spring/Mongo)
+public class Customer360 {
+    String customerId;
+    String customerType;
+    String profile;
+    String status;
+    Integer totalAccounts;
+    Integer totalCards;
+    Integer totalCredits;
+    Integer totalWallets;
+    BigDecimal totalBalanceAccounts;
+    BigDecimal totalCreditLimit;
+    BigDecimal totalCreditDebt;
+    BigDecimal totalWalletBalance;
+    Boolean hasOverdueDebt;
+    LocalDateTime lastMovementAt;
+    LocalDateTime updatedAt;
+    List<ProductSummary> products;       // Productos detallados
+    List<ProductEvent> recentEvents;     // Últimos 20 eventos
 }
 ```
 
@@ -611,18 +735,22 @@ curl http://localhost:8088/actuator/health
 ## 13. Estrategia de pruebas
 
 ### Unitarias
-- `ReportService` (agregaciones MongoDB, consultas optimizadas, mapeo DTOs)
-- Validadores de query params
-- Manejo de cache (RedisAdapter)
+- Servicios de dominio: `GetCustomer360Service`, `GetCardMovementsService`, `GetCustomerSummaryService`, etc.
+- Mapeo DTOs y validadores de query params
+- Manejo de cache (RedisCacheAdapter)
 
 ### Integración
 - Controladores con `WebTestClient` (ver `ReportControllerTest.java`)
 - Repositorios con `@DataMongoTest`
-- Redis embebido o mock reactivo
+- Configuración infraestructura (`InfrastructureConfigTest`)
 
 ### Eventos
-- `EmbeddedKafka` (verificar ingesta en `product_events` y descarte duplicados en `processed_events`)
-- Contrato: Pact consumer para 20 topics (verificar schema payload)
+- `ReportsEventConsumerTest` (verificar ingesta en `product_events` y descarte duplicados en `processed_events`)
+- `ProcessedEventAdapterTest` (verificar idempotencia)
+- `MockFixtures.java` para datos de prueba reutilizables
+
+### Test Cases QA
+- `test-cases/` con 7 casos: CP-123 (reporte agregado, cliente, movimientos, productos), CP-124 (rango fechas inválido), CP-125 (reporte sin datos)
 
 ### Cobertura mínima documental por endpoint
 Cada endpoint debe contar con:
@@ -659,7 +787,7 @@ Cada endpoint debe contar con:
 | **Parte II**: "Generar un reporte completo y general por producto del banco en intervalo de tiempo especificado por el usuario" | `GET /api/reports/products?from=&to=` (streaming todos eventos) | ✅ **Completo** |
 | **Parte II**: "Implementar un reporte con los últimos 10 movimientos de la tarjeta de débito y de crédito" | `GET /api/reports/movements/cards/{cardId}?limit=10` | ✅ **Completo** |
 | **Parte III**: Arquitectura orientada a eventos, Kafka, sin REST entre servicios, CQRS read-only | Arquitectura completa | ✅ **Completo** |
-| **Parte III**: Reportes agregados y vistas 360° | 7 endpoints implementados | ✅ **Completo** |
+| **Parte III**: Reportes agregados y vistas 360° | 8 endpoints implementados | ✅ **Completo** |
 | **Pendiente**: Estado de cuenta paginado | `GET /api/reports/accounts/{accountId}/statement` | 🚧 Backlog |
 | **Pendiente**: Plan de pagos crédito | `GET /api/reports/credits/{creditId}/schedule` | 🚧 Backlog |
 | **Pendiente**: Actividad wallet | `GET /api/reports/wallets/{walletId}/activity` | 🚧 Backlog |
