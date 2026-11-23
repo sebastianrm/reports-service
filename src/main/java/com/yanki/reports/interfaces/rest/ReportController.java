@@ -132,7 +132,7 @@ public class ReportController {
             @RequestParam("type") @NotBlank final String type,
             @RequestParam("from") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) final LocalDate from,
             @RequestParam("to") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) final LocalDate to,
-            @RequestParam("customerType") @NotBlank final String customerType) {
+            @RequestParam(value = "customerType", required = false) final String customerType) {
 
         log.info("Solicitud de reporte agregado: type={}, from={}, to={}, customerType={}", type, from, to, customerType);
         try {

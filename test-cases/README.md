@@ -3,7 +3,7 @@
 Directorio con los casos de prueba aplicables al microservicio **reports-service** (puerto 8088).
 
 ## Origen
-Estos casos de prueba derivan de la **Matriz de Trazabilidad por Microservicio** (`../../CASOS_PRUEBA/TRACEABILIDAD_POR_SERVICIO.md#8-reports-service-puerto-8088---esqueleto`) y del documento global `../../CASOS_PRUEBA/CASOS_PRUEBA_QA.md` (sección **CU-13: Reportes Bancarios**).
+Estos casos de prueba derivan de la **Matriz de Trazabilidad por Microservicio** (`../../docs/CASOS_PRUEBA`) y del documento global `../../docs/CASOS_PRUEBA` (sección **CU-13: Reportes Bancarios**).
 
 ## Casos de Prueba Globales (CU-13)
 

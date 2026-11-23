@@ -774,9 +774,10 @@ Cada endpoint debe contar con:
 | `../../README.md#trazabilidad-y-documentación` | Sección Trazabilidad | Índice general |
 | `../../AGENTS.md` | Reglas de Oro | Trazabilidad + Arquitectura Hexagonal |
 | `../../system-prompt-auditoria-hexagonal-yanki.md` | System Prompt | Auditoría arquitectura hexagonal obligatoria |
-| `../CASOS_PRUEBA/README.md` | Catálogo local | CPs específicos del servicio |
-| `../CASOS_PRUEBA/MOCKS.md` | Mocks | Datos de prueba para eventos |
-| `../CASOS_PRUEBA/CP-027-generacion-reporte-exitoso.md` | CP-027 | Caso de prueba local |
+| `../docs/CASOS_PRUEBA` | Catálogo local | CPs específicos del servicio |
+| `../docs/CASOS_PRUEBA` | Mocks | Datos de prueba para eventos |
+| `../docs/CASOS_PRUEBA` | CP-027 | Caso de prueba local |
+| `api/reports-service.yaml` | Contrato OpenAPI 3.0 | Especificación completa con schemas, endpoints y errores |
 
 ---
 

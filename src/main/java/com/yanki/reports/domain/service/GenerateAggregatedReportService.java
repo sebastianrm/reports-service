@@ -55,8 +55,8 @@ public class GenerateAggregatedReportService implements GenerateAggregatedReport
                         "Tipo de producto no soportado: " + productType + ". Valores: ACCOUNT, CARD, CREDIT, WALLET"));
             }
 
-            // Validar customerType
-            if (!isValidCustomerType(customerType)) {
+            // Validar customerType (opcional: si es null se omite el filtro)
+            if (customerType != null && !isValidCustomerType(customerType)) {
                 log.warn("Tipo de cliente no válido: {}", customerType);
                 return Single.error(new InvalidDateRangeException(
                         "Tipo de cliente no válido: " + customerType + ". Valores: NATURAL, JURIDICA"));
@@ -64,6 +64,10 @@ public class GenerateAggregatedReportService implements GenerateAggregatedReport
 
             // Verificar lag de Kafka antes de consultar
             return kafkaLagPort.isLagHigh(LAG_THRESHOLD)
+                    .onErrorReturn(e -> {
+                        log.warn("Error verificando lag de Kafka, procediendo con reporte: error={}", e.getMessage());
+                        return false;
+                    })
                     .flatMap(isHigh -> {
                         if (isHigh) {
                             log.warn("Lag de Kafka alto, superando umbral de {} eventos. Reporte agregado rechazado.", LAG_THRESHOLD);
@@ -106,7 +110,7 @@ public class GenerateAggregatedReportService implements GenerateAggregatedReport
 
         return persistencePort.findByProductTypeAndOccurredAtBetweenOrderByOccurredAtDesc(
                         productType, fromDateTime, toDateTime)
-                .filter(event -> customerType.equalsIgnoreCase(event.getSubType()))
+                .filter(event -> customerType == null || customerType.equalsIgnoreCase(event.getSubType()))
                 .toList()
                 .map(events -> {
                     log.debug("MongoDB retornó {} eventos para agregación", events.size());
@@ -136,6 +140,11 @@ public class GenerateAggregatedReportService implements GenerateAggregatedReport
                             .flatMap(v -> {
                                 log.debug("Reporte agregado cacheado exitosamente: key={}", cacheKey);
                                 return Single.just(report);
+                            })
+                            .onErrorReturn(e -> {
+                                log.warn("Cache PUT falló, retornando reporte sin cachear: key={}, error={}",
+                                        cacheKey, e.getMessage());
+                                return report;
                             });
                 });
     }

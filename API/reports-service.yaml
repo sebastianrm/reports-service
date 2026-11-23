@@ -1,0 +1,890 @@
+openapi: 3.0.3
+info:
+  title: Yanki Reports Service API
+  description: |
+    API REST de reportes y analítica de la plataforma bancaria Yanki.
+    
+    Servicio CQRS read-only que consume eventos Kafka y proyecta en MongoDB
+    para generar reportes agregados, vista 360° de clientes, movimientos de tarjetas,
+    y agregados diarios para dashboards.
+    
+    **Características principales:**
+    - Reporte agregado por tipo de producto y rango de fechas
+    - Eventos de producto por rango (streaming SSE)
+    - Reporte completo de cliente (Vista 360°)
+    - Últimos movimientos de tarjeta
+    - Resumen 360° del cliente
+    - Vista 360° completa con productos y eventos recientes
+    - Resumen de producto específico
+    - Agregados diarios para dashboards
+  version: 1.0.0
+  contact:
+    name: Sebastian Retamal Morales
+    email: retamal.sebastian@gmail.com
+  license:
+    name: Proprietary
+    url: https://yanki.com/license
+
+servers:
+  - url: http://localhost:8088
+    description: Entorno local de desarrollo
+  - url: https://api-gateway.yanki.com/api/reports
+    description: Entorno de producción (vía API Gateway)
+
+tags:
+  - name: Reports
+    description: Endpoints de reportes y analítica — CQRS read-only
+
+paths:
+  /api/reports/aggregated:
+    get:
+      tags: [Reports]
+      summary: Reporte agregado por tipo de producto
+      description: |
+        Obtiene estadísticas consolidadas de eventos para un tipo de producto específico
+        dentro de un rango de fechas y tipo de cliente.
+        
+        Incluye: count, sumAmount, averageAmount.
+      operationId: getAggregatedReport
+      parameters:
+        - name: type
+          in: query
+          required: true
+          description: Tipo de producto a filtrar
+          schema:
+            type: string
+            enum: [ACCOUNT, CARD, CREDIT, WALLET]
+            example: "ACCOUNT"
+        - name: from
+          in: query
+          required: true
+          description: Fecha inicial del rango (inclusive, ISO-8601)
+          schema:
+            type: string
+            format: date
+            example: "2024-01-01"
+        - name: to
+          in: query
+          required: true
+          description: Fecha final del rango (inclusive, ISO-8601)
+          schema:
+            type: string
+            format: date
+            example: "2024-12-31"
+        - name: customerType
+          in: query
+          required: true
+          description: Tipo de cliente a filtrar
+          schema:
+            type: string
+            enum: [NATURAL, JURIDICA]
+            example: "NATURAL"
+      responses:
+        '200':
+          description: Reporte agregado obtenido exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AggregatedReportResponse'
+        '400':
+          description: Parámetros inválidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: No autorizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Error interno en agregación MongoDB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '503':
+          description: Servicio no disponible: lag Kafka alto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/reports/products:
+    get:
+      tags: [Reports]
+      summary: Eventos de producto por rango de fechas
+      description: |
+        Retorna el flujo completo de eventos de producto proyectados desde Kafka a MongoDB
+        dentro de un rango de fechas especificado. Retorna un flujo reactivo (Server-Sent Events).
+      operationId: getProducts
+      parameters:
+        - name: from
+          in: query
+          required: false
+          description: Fecha inicial del rango (inclusive, ISO-8601)
+          schema:
+            type: string
+            format: date
+            default: "2020-01-01"
+            example: "2024-06-01"
+        - name: to
+          in: query
+          required: false
+          description: Fecha final del rango (inclusive, ISO-8601)
+          schema:
+            type: string
+            format: date
+            default: "2099-12-31"
+            example: "2024-06-30"
+      responses:
+        '200':
+          description: Flujo de eventos obtenido exitosamente
+          content:
+            application/x-ndjson:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProductEventResponse'
+        '400':
+          description: Parámetros inválidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: No autorizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Error interno consultando eventos de MongoDB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/reports/customers/{customerId}:
+    get:
+      tags: [Reports]
+      summary: Reporte completo de cliente (Vista 360°)
+      description: |
+        Agrega todos los productos asociados a un cliente con sus eventos correspondientes,
+        organizados por tipo de producto. Si el cliente no tiene eventos, retorna products = [].
+      operationId: getCustomerReport
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          description: Identificador único del cliente
+          schema:
+            type: string
+            example: "6af39f59b089e973a5ffe9b6"
+      responses:
+        '200':
+          description: Reporte del cliente obtenido exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerReportResponse'
+        '401':
+          description: No autorizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Error interno agregando productos desde MongoDB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/reports/movements/cards/{cardId}:
+    get:
+      tags: [Reports]
+      summary: Últimos movimientos de tarjeta
+      description: |
+        Consulta optimizada para obtener los movimientos más recientes de una tarjeta
+        de crédito o débito, ordenados por fecha de ocurrencia (más reciente primero).
+      operationId: getCardMovements
+      parameters:
+        - name: cardId
+          in: path
+          required: true
+          description: Identificador único de la tarjeta
+          schema:
+            type: string
+            example: "CARD-12345"
+        - name: limit
+          in: query
+          required: false
+          description: Número máximo de movimientos (default: 10, máx: 100)
+          schema:
+            type: integer
+            format: int32
+            default: 10
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: Movimientos de tarjeta obtenidos exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardMovementsResponse'
+        '404':
+          description: Tarjeta no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: No autorizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Error interno consultando MongoDB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/reports/customer-summary/{customerId}:
+    get:
+      tags: [Reports]
+      summary: Resumen 360° del cliente
+      description: |
+        Obtiene el resumen consolidado de un cliente con totales de cuentas, tarjetas,
+        créditos y wallets, así como saldos acumulados y estado de deudas vencidas.
+      operationId: getCustomerSummary
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          description: Identificador único del cliente
+          schema:
+            type: string
+            example: "6af39f59b089e973a5ffe9b6"
+      responses:
+        '200':
+          description: Resumen del cliente obtenido exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerSummaryResponse'
+        '404':
+          description: Cliente no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: No autorizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Error interno consultando MongoDB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/reports/customer-360/{customerId}:
+    get:
+      tags: [Reports]
+      summary: Vista 360° completa del cliente
+      description: |
+        Obtiene la vista completa de un cliente combinando el resumen consolidado,
+        la lista detallada de productos y los últimos eventos registrados.
+      operationId: getCustomer360
+      parameters:
+        - name: customerId
+          in: path
+          required: true
+          description: Identificador único del cliente
+          schema:
+            type: string
+            example: "6af39f59b089e973a5ffe9b6"
+      responses:
+        '200':
+          description: Vista 360° del cliente obtenida exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Customer360Response'
+        '404':
+          description: Cliente no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: No autorizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Error interno consultando MongoDB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/reports/products/{productId}:
+    get:
+      tags: [Reports]
+      summary: Resumen de producto específico
+      description: |
+        Obtiene el estado actual de un producto bancario (cuenta, tarjeta, crédito o wallet)
+        con saldos, límites y estado.
+      operationId: getProductSummary
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          description: Identificador único del producto (accountId, cardId, creditId, walletId)
+          schema:
+            type: string
+            example: "ACC-12345"
+      responses:
+        '200':
+          description: Resumen del producto obtenido exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductSummaryResponse'
+        '404':
+          description: Producto no encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: No autorizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Error interno consultando MongoDB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+  /api/reports/daily-aggregates:
+    get:
+      tags: [Reports]
+      summary: Agregados diarios para dashboards y analítica
+      description: |
+        Obtiene las métricas diarias consolidadas por tipo de producto y tipo de cliente.
+        Incluye: movementCount, totalAmount, avgAmount, uniqueCustomers, uniqueProducts.
+      operationId: getDailyAggregates
+      parameters:
+        - name: date
+          in: query
+          required: true
+          description: Fecha del día para obtener agregados (ISO-8601)
+          schema:
+            type: string
+            format: date
+            example: "2024-06-15"
+        - name: productType
+          in: query
+          required: false
+          description: Filtro opcional por tipo de producto
+          schema:
+            type: string
+            enum: [ACCOUNT, CARD, CREDIT, WALLET]
+            example: "ACCOUNT"
+      responses:
+        '200':
+          description: Agregados diarios obtenidos exitosamente
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DailyAggregateResponse'
+        '400':
+          description: Parámetros inválidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: No autorizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Error interno consultando MongoDB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+
+components:
+  schemas:
+    AggregatedReportResponse:
+      type: object
+      description: Reporte agregado con métricas consolidadas por tipo de producto
+      properties:
+        type:
+          type: string
+          description: Tipo de producto
+          enum: [ACCOUNT, CARD, CREDIT, WALLET]
+          example: "ACCOUNT"
+        customerType:
+          type: string
+          description: Tipo de cliente
+          enum: [NATURAL, JURIDICA]
+          example: "NATURAL"
+        from:
+          type: string
+          format: date
+          description: Fecha inicial del rango (ISO-8601)
+          example: "2024-01-01"
+        to:
+          type: string
+          format: date
+          description: Fecha final del rango (ISO-8601)
+          example: "2024-12-31"
+        count:
+          type: integer
+          format: int64
+          description: Cantidad total de eventos en el rango
+          example: 1500
+        sumAmount:
+          type: number
+          format: decimal
+          description: Suma total de montos de todos los eventos
+          example: 1250000.00
+        averageAmount:
+          type: number
+          format: decimal
+          description: Promedio de montos (redondeado a 2 decimales)
+          example: 833.33
+
+    ProductEventResponse:
+      type: object
+      description: Evento de producto proyectado desde Kafka a MongoDB
+      properties:
+        id:
+          type: string
+          description: Identificador único del evento
+          example: "evt-12345"
+        eventType:
+          type: string
+          description: Tipo de evento (OPENED, CLOSED, DEPOSITED, WITHDRAWN, etc.)
+          example: "DEPOSITED"
+        aggregateId:
+          type: string
+          description: Identificador del producto (accountId, cardId, etc.)
+          example: "ACC-12345"
+        productType:
+          type: string
+          description: Tipo de producto
+          enum: [ACCOUNT, CARD, CREDIT, WALLET]
+          example: "ACCOUNT"
+        subType:
+          type: string
+          description: Subtipo de producto (SAVINGS, CREDIT, DEBIT, etc.)
+          example: "SAVINGS"
+        customerId:
+          type: string
+          description: Identificador del cliente propietario
+          example: "CUST-001"
+        amount:
+          type: number
+          format: decimal
+          description: Monto del evento
+          example: 500.00
+        balanceAfter:
+          type: number
+          format: decimal
+          description: Saldo después del evento
+          example: 1500.00
+        metadata:
+          type: object
+          description: Metadata adicional del evento
+          additionalProperties: true
+          nullable: true
+        occurredAt:
+          type: string
+          format: date-time
+          description: Fecha y hora del evento (ISO 8601)
+          example: "2024-06-15T10:30:00"
+
+    CustomerReportResponse:
+      type: object
+      description: Reporte completo de cliente con productos agrupados
+      properties:
+        customerId:
+          type: string
+          description: Identificador del cliente
+          example: "6af39f59b089e973a5ffe9b6"
+        products:
+          type: array
+          description: Lista de grupos de productos con sus eventos
+          items:
+            $ref: '#/components/schemas/ProductGroup'
+
+    ProductGroup:
+      type: object
+      description: Grupo de productos con sus eventos asociados
+      properties:
+        aggregateId:
+          type: string
+          description: ID del producto (accountId, cardId, etc.)
+          example: "ACC-12345"
+        productType:
+          type: string
+          description: Tipo de producto
+          enum: [ACCOUNT, CARD, CREDIT, WALLET]
+          example: "ACCOUNT"
+        subType:
+          type: string
+          description: Subtipo de producto
+          example: "SAVINGS"
+        events:
+          type: array
+          description: Lista de eventos asociados al producto
+          items:
+            $ref: '#/components/schemas/ProductEventResponse'
+
+    CardMovementsResponse:
+      type: object
+      description: Respuesta con los movimientos de una tarjeta
+      properties:
+        cardId:
+          type: string
+          description: Identificador de la tarjeta
+          example: "CARD-12345"
+        productType:
+          type: string
+          description: Tipo de producto (CARD)
+          example: "CARD"
+        subType:
+          type: string
+          description: Subtipo de tarjeta (CREDIT, DEBIT)
+          example: "CREDIT"
+        movements:
+          type: array
+          description: Lista de eventos de consumo/pago asociados a la tarjeta
+          items:
+            $ref: '#/components/schemas/ProductEventResponse'
+
+    CustomerSummaryResponse:
+      type: object
+      description: Resumen consolidado de un cliente con totales de productos y saldos
+      properties:
+        customerId:
+          type: string
+          description: Identificador del cliente
+          example: "6af39f59b089e973a5ffe9b6"
+        customerType:
+          type: string
+          description: Tipo de cliente
+          enum: [NATURAL, JURIDICA]
+          example: "NATURAL"
+        profile:
+          type: string
+          description: Perfil del cliente
+          enum: [PERSONAL, VIP, PYME, EMPRESARIAL]
+          example: "PERSONAL"
+        status:
+          type: string
+          description: Estado del cliente
+          enum: [ACTIVE, INACTIVE, BLOCKED]
+          example: "ACTIVE"
+        totalAccounts:
+          type: integer
+          description: Total de cuentas bancarias
+          example: 2
+        totalCards:
+          type: integer
+          description: Total de tarjetas
+          example: 1
+        totalCredits:
+          type: integer
+          description: Total de créditos
+          example: 1
+        totalWallets:
+          type: integer
+          description: Total de wallets
+          example: 1
+        totalBalanceAccounts:
+          type: number
+          format: decimal
+          description: Saldo total en cuentas bancarias
+          example: 15000.00
+        totalCreditLimit:
+          type: number
+          format: decimal
+          description: Límite total de créditos
+          example: 50000.00
+        totalCreditDebt:
+          type: number
+          format: decimal
+          description: Deuda total de créditos
+          example: 25000.00
+        totalWalletBalance:
+          type: number
+          format: decimal
+          description: Saldo total en wallets
+          example: 500.00
+        hasOverdueDebt:
+          type: boolean
+          description: Indica si tiene deudas vencidas
+          example: false
+
+    Customer360Response:
+      type: object
+      description: Vista 360° completa del cliente con resumen, productos y eventos recientes
+      properties:
+        customerId:
+          type: string
+          description: Identificador del cliente
+          example: "6af39f59b089e973a5ffe9b6"
+        customerType:
+          type: string
+          description: Tipo de cliente
+          enum: [NATURAL, JURIDICA]
+          example: "NATURAL"
+        profile:
+          type: string
+          description: Perfil del cliente
+          enum: [PERSONAL, VIP, PYME, EMPRESARIAL]
+          example: "PERSONAL"
+        status:
+          type: string
+          description: Estado del cliente
+          enum: [ACTIVE, INACTIVE, BLOCKED]
+          example: "ACTIVE"
+        totalAccounts:
+          type: integer
+          description: Total de cuentas bancarias
+          example: 2
+        totalCards:
+          type: integer
+          description: Total de tarjetas
+          example: 1
+        totalCredits:
+          type: integer
+          description: Total de créditos
+          example: 1
+        totalWallets:
+          type: integer
+          description: Total de wallets
+          example: 1
+        totalBalanceAccounts:
+          type: number
+          format: decimal
+          description: Saldo total en cuentas bancarias
+          example: 15000.00
+        totalCreditLimit:
+          type: number
+          format: decimal
+          description: Límite total de créditos
+          example: 50000.00
+        totalCreditDebt:
+          type: number
+          format: decimal
+          description: Deuda total de créditos
+          example: 25000.00
+        totalWalletBalance:
+          type: number
+          format: decimal
+          description: Saldo total en wallets
+          example: 500.00
+        hasOverdueDebt:
+          type: boolean
+          description: Indica si tiene deudas vencidas
+          example: false
+        products:
+          type: array
+          description: Lista detallada de productos con estado, saldos y límites
+          items:
+            $ref: '#/components/schemas/ProductSummaryResponse'
+        recentEvents:
+          type: array
+          description: Últimos 20 eventos del cliente (ordenados por fecha descendente)
+          items:
+            $ref: '#/components/schemas/ProductEventResponse'
+
+    ProductSummaryResponse:
+      type: object
+      description: Resumen de un producto bancario con estado, saldos y límites
+      properties:
+        productId:
+          type: string
+          description: Identificador del producto
+          example: "ACC-12345"
+        productType:
+          type: string
+          description: Tipo de producto
+          enum: [ACCOUNT, CARD, CREDIT, WALLET]
+          example: "ACCOUNT"
+        subType:
+          type: string
+          description: Subtipo de producto
+          example: "SAVINGS"
+        customerId:
+          type: string
+          description: Cliente propietario
+          example: "CUST-001"
+        status:
+          type: string
+          description: Estado del producto
+          enum: [OPEN, ACTIVE, CLOSED, BLOCKED, OVERDUE]
+          example: "OPEN"
+        currentBalance:
+          type: number
+          format: decimal
+          description: Saldo actual (cuentas y wallets)
+          example: 1000.00
+          nullable: true
+        creditLimit:
+          type: number
+          format: decimal
+          description: Límite de crédito (tarjetas)
+          example: 10000.00
+          nullable: true
+        availableLimit:
+          type: number
+          format: decimal
+          description: Límite disponible (tarjetas)
+          example: 8500.00
+          nullable: true
+        outstandingBalance:
+          type: number
+          format: decimal
+          description: Saldo pendiente (créditos)
+          example: 7500.00
+          nullable: true
+        currency:
+          type: string
+          description: Moneda
+          enum: [PEN, USD]
+          example: "PEN"
+        openedAt:
+          type: string
+          format: date-time
+          description: Fecha de apertura (ISO 8601)
+          example: "2024-01-15T10:00:00"
+          nullable: true
+        closedAt:
+          type: string
+          format: date-time
+          description: Fecha de cierre (ISO 8601)
+          example: "2024-06-01T14:00:00"
+          nullable: true
+        lastMovementAt:
+          type: string
+          format: date-time
+          description: Fecha del último movimiento (ISO 8601)
+          example: "2024-06-15T10:30:00"
+          nullable: true
+
+    DailyAggregateResponse:
+      type: object
+      description: Métricas diarias consolidadas por tipo de producto y tipo de cliente
+      properties:
+        id:
+          type: string
+          description: Identificador compuesto (YYYY-MM-DD:PRODUCT_TYPE:CUSTOMER_TYPE)
+          example: "2024-06-15:ACCOUNT:NATURAL"
+        date:
+          type: string
+          format: date
+          description: Fecha del día agregado (ISO-8601)
+          example: "2024-06-15"
+        productType:
+          type: string
+          description: Tipo de producto
+          enum: [ACCOUNT, CARD, CREDIT, WALLET]
+          example: "ACCOUNT"
+        customerType:
+          type: string
+          description: Tipo de cliente
+          enum: [NATURAL, JURIDICA]
+          example: "NATURAL"
+        movementCount:
+          type: integer
+          format: int64
+          description: Cantidad total de movimientos en el día
+          example: 250
+        totalAmount:
+          type: number
+          format: decimal
+          description: Monto total acumulado en el día
+          example: 125000.00
+        avgAmount:
+          type: number
+          format: decimal
+          description: Monto promedio por movimiento
+          example: 500.00
+        uniqueCustomers:
+          type: integer
+          description: Clientes únicos con movimientos
+          example: 85
+        uniqueProducts:
+          type: integer
+          description: Productos únicos con movimientos
+          example: 120
+
+    ApiError:
+      type: object
+      description: Cuerpo estándar de error de la API Yanki
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          description: Momento exacto en que se generó el error (ISO 8601)
+          example: "2024-01-15T10:30:00Z"
+        status:
+          type: integer
+          format: int32
+          description: Código de estado HTTP
+          example: 400
+        error:
+          type: string
+          description: Descripción textual del error HTTP
+          example: "Bad Request"
+        code:
+          type: string
+          description: Código de negocio específico del error
+          example: "INVALID_TYPE"
+        message:
+          type: string
+          description: Descripción legible del error en español
+          example: "Tipo de producto no reconocido"
+        path:
+          type: string
+          description: Ruta de la API que originó el error
+          example: "/api/reports/aggregated"
+        details:
+          type: object
+          description: Detalle adicional del error
+          additionalProperties: true
+          nullable: true
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Token JWT obtenido mediante el endpoint /api/auth/login del auth-service
+
+security:
+  - BearerAuth: []

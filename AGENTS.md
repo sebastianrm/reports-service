@@ -417,7 +417,7 @@ curl -s http://localhost:8088/actuator/metrics/reports.events.ingested | jq '.me
 ### Casos de Prueba (Local - reports-service)
 | CP | Descripción | Link |
 |----|-------------|------|
-| CP-027 | Generación reporte exitoso | [`../CASOS_PRUEBA/CP-027-generacion-reporte-exitoso.md`](../CASOS_PRUEBA/CP-027-generacion-reporte-exitoso.md) |
+| CP-027 | Generación reporte exitoso | [`../docs/CASOS_PRUEBA`](../docs/CASOS_PRUEBA/CP-027-generacion-reporte-exitoso.md) |
 
 ### Matrices de Trazabilidad
 - **RTM Global**: [`../../CASOS_PRUEBA/RTM.md#cu-13`](../../CASOS_PRUEBA/RTM.md#cu-13)
